@@ -285,8 +285,18 @@
   })
 
   $input.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() }
-  })
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() }
+})
+$input.addEventListener('input', () => {
+  if ($input.value.includes('\n')) {
+    $input.value = $input.value.replace(/\n/g, '')
+    sendMessage()
+    return
+  }
+  $sendBtn.disabled = !$input.value.trim() || isLoading
+  $input.style.height = 'auto'
+  $input.style.height = Math.min($input.scrollHeight, 160) + 'px'
+})
 
   $modelSel.addEventListener('change', () => {
     $statusModel.textContent = $modelSel.value
