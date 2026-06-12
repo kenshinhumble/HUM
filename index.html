@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -39,7 +40,9 @@ html,body { height:100%; font-family:'Inter',sans-serif; background:var(--bg); c
 ::-webkit-scrollbar-thumb { background:var(--border); border-radius:99px; }
 
 /* ─── Layout ─── */
-#app { display:flex; flex-direction:column; height:100dvh; max-width:880px; margin:0 auto; position:relative; }
+#app { display:none; flex-direction:column; height:100dvh; max-width:880px; margin:0 auto; position:relative; }
+#app.visible { display:flex; }
+#login-screen.hidden { display:none; }
 
 /* ─── Header ─── */
 header {
@@ -280,10 +283,77 @@ textarea#input::placeholder { color:var(--muted); }
 
 /* ─── Animations ─── */
 @keyframes fadeUp  { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
-@keyframes blink   { 0%,100%{opacity:0} 50%{opacity:1} }
+@keyframes blink   { 0%,100%{opacity:0} 50%{opacity:1} }/* ─── Login Screen ─── */
+#login-screen {
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  height:100dvh; max-width:880px; margin:0 auto; text-align:center;
+  padding:24px; gap:18px;
+}
+#login-screen .logo-icon-big { margin-bottom:4px; }
+#login-screen h1 { font-size:24px; font-weight:700; letter-spacing:.06em; }
+#login-screen p  { font-size:13px; color:var(--muted); max-width:300px; line-height:1.6; }
+.google-btn {
+  display:flex; align-items:center; gap:10px; justify-content:center;
+  background:var(--elevated); border:1px solid var(--border);
+  color:var(--text); padding:12px 24px; border-radius:var(--r-md);
+  cursor:pointer; font-size:14px; font-weight:600; font-family:'Inter',sans-serif;
+  transition:border-color .15s, background .15s; margin-top:8px;
+}
+.google-btn:hover { border-color:var(--border-hi); background:var(--input-bg); }
+.google-btn svg { width:18px; height:18px; flex-shrink:0; }
+.login-loading { font-size:12px; color:var(--muted); margin-top:6px; }
+
+/* ─── User menu in header ─── */
+.user-btn {
+  width:34px; height:34px; border-radius:50%; overflow:hidden;
+  border:1px solid var(--border); cursor:pointer; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center;
+  background:var(--elevated); padding:0;
+}
+.user-btn img { width:100%; height:100%; object-fit:cover; }
+.user-menu {
+  position:absolute; top:calc(100% + 6px); right:0;
+  background:var(--elevated); border:1px solid var(--border);
+  border-radius:var(--r-md); overflow:hidden; z-index:50;
+  min-width:180px; box-shadow:0 8px 32px rgba(0,0,0,.5);
+  opacity:0; transform:translateY(-6px) scale(.97);
+  pointer-events:none; transition:opacity .15s, transform .15s;
+}
+.user-menu.open { opacity:1; transform:translateY(0) scale(1); pointer-events:all; }
+.user-menu-email {
+  padding:11px 13px; font-size:11.5px; color:var(--muted);
+  border-bottom:1px solid var(--border); word-break:break-all;
+}
+.user-menu-item {
+  display:flex; align-items:center; gap:9px;
+  padding:10px 13px; cursor:pointer; font-size:13px; color:var(--text);
+  transition:background .1s;
+}
+.user-menu-item:hover { background:var(--accent-glow); }
+.user-menu-item svg { width:14px; height:14px; flex-shrink:0; color:var(--muted); }
+
 </style>
 </head>
 <body>
+
+<!-- ═══ LOGIN SCREEN ═══ -->
+<div id="login-screen">
+  <svg class="logo-icon-big" width="48" height="32" viewBox="0 0 36 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0"  y="10" width="4" height="4"  rx="2" fill="#2dd4bf" opacity=".35"/>
+    <rect x="6"  y="6"  width="4" height="12" rx="2" fill="#2dd4bf" opacity=".55"/>
+    <rect x="12" y="1"  width="4" height="22" rx="2" fill="#2dd4bf"/>
+    <rect x="18" y="4"  width="4" height="16" rx="2" fill="#2dd4bf" opacity=".75"/>
+    <rect x="24" y="7"  width="4" height="10" rx="2" fill="#2dd4bf" opacity=".5"/>
+    <rect x="30" y="10" width="4" height="4"  rx="2" fill="#2dd4bf" opacity=".25"/>
+  </svg>
+  <h1>HUM</h1>
+  <p>Humble Utility Machine — masuk dengan Google untuk mulai chat dan menyimpan riwayat percakapanmu.</p>
+  <button class="google-btn" id="google-login-btn" type="button">
+    <svg viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.99.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+    Masuk dengan Google
+  </button>
+  <p class="login-loading hidden" id="login-loading">Menghubungkan...</p>
+</div>
 
 <div id="app">
 
@@ -371,6 +441,22 @@ textarea#input::placeholder { color:var(--muted); }
           <line x1="11.5" y1="8.5" x2="11.5" y2="13.5"/>
         </svg>
       </button>
+
+      <!-- User menu -->
+      <div class="model-wrap">
+        <button class="user-btn" id="user-btn" type="button" title="Akun">
+          <img id="user-avatar" src="" alt="">
+        </button>
+        <div class="user-menu" id="user-menu">
+          <div class="user-menu-email" id="user-email">-</div>
+          <div class="user-menu-item" id="logout-btn">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M7 17H4a1 1 0 01-1-1V4a1 1 0 011-1h3M13 14l4-4-4-4M17 10H7"/>
+            </svg>
+            Keluar
+          </div>
+        </div>
+      </div>
     </div>
   </header>
 
@@ -439,10 +525,86 @@ textarea#input::placeholder { color:var(--muted); }
 <script>
 'use strict'
 
+// ─── Supabase Setup ────────────────────────────────────────────
+const SUPABASE_URL = 'https://fudqidnzqtvqkdxuanyo.supabase.co'
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ1ZHFpZG56cXR2cWtkeHVhbnlvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEyMDQ4NDEsImV4cCI6MjA5Njc4MDg0MX0.ULtgB32kT8Nu4SVbcHv4DHdaKCiTTF6AWwFH2esb7Fc'
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+
+let currentUser = null
+let currentSession = null
+
+const $loginScreen = document.getElementById('login-screen')
+const $appRoot     = document.getElementById('app')
+const $googleBtn   = document.getElementById('google-login-btn')
+const $loginLoad   = document.getElementById('login-loading')
+const $userBtn     = document.getElementById('user-btn')
+const $userMenu    = document.getElementById('user-menu')
+const $userAvatar  = document.getElementById('user-avatar')
+const $userEmail   = document.getElementById('user-email')
+const $logoutBtn   = document.getElementById('logout-btn')
+
+$googleBtn.addEventListener('click', async () => {
+  $loginLoad.classList.remove('hidden')
+  await sb.auth.signInWithOAuth({
+    provider: 'google',
+    options: { redirectTo: window.location.origin }
+  })
+})
+
+$userBtn.addEventListener('click', e => {
+  e.stopPropagation()
+  $userMenu.classList.toggle('open')
+})
+document.addEventListener('click', () => $userMenu.classList.remove('open'))
+
+$logoutBtn.addEventListener('click', async () => {
+  await sb.auth.signOut()
+  window.location.reload()
+})
+
+function showApp(user) {
+  currentUser = user
+  $userAvatar.src = user.user_metadata?.avatar_url || ''
+  $userEmail.textContent = user.email || ''
+  $loginScreen.classList.add('hidden')
+  $appRoot.classList.add('visible')
+  initApp()
+}
+
+function showLogin() {
+  $loginScreen.classList.remove('hidden')
+  $appRoot.classList.remove('visible')
+}
+
+// ─── Check session on load ─────────────────────────────────────
+sb.auth.getSession().then(({ data }) => {
+  if (data.session) {
+    currentSession = data.session
+    showApp(data.session.user)
+  } else {
+    showLogin()
+  }
+})
+
+sb.auth.onAuthStateChange((event, session) => {
+  currentSession = session
+  if (session) {
+    if (!currentUser) showApp(session.user)
+  } else {
+    showLogin()
+  }
+})
+
+
+
 // ─── Constants ───────────────────────────────────────────────
 const DEFAULT_SYSTEM = 'Kamu adalah HUM (Humble Utility Machine) — asisten AI yang rendah hati, cerdas, dan selalu berusaha memberikan jawaban yang benar-benar berguna. Kamu tidak pernah sombong, selalu jujur jika tidak tahu, dan senang membantu siapa saja. Jawab dengan jelas, ringkas, dan hangat. Gunakan Bahasa Indonesia kecuali user minta bahasa lain.'
 
 const TYPEWRITER_SPEED = 10 // ms per char (lower = faster)
+const STORAGE_KEY = 'hum_chat_history_v1'
+const STORAGE_SYS_KEY = 'hum_system_prompt_v1'
+const STORAGE_MODEL_KEY = 'hum_model_v1'
+const MAX_CONTEXT_MESSAGES = 20 // jumlah pesan terakhir yang dikirim ke API
 
 // ─── State ───────────────────────────────────────────────────
 let messages    = []
@@ -493,6 +655,7 @@ $modelMenu.addEventListener('click', e => {
 
   $modelMenu.classList.remove('open')
   $modelTrig.classList.remove('open')
+  saveState()
 })
 
 // ─── Textarea auto-resize + enable send ──────────────────────
@@ -535,6 +698,7 @@ $clearBtn.addEventListener('click', () => {
   document.querySelectorAll('.msg-row, .error-box').forEach(el => el.remove())
   $empty.style.display = ''
   $clearBtn.disabled = true
+  localStorage.removeItem(STORAGE_KEY)
 })
 
 // ─── Settings modal ───────────────────────────────────────────
@@ -548,6 +712,7 @@ $overlay.addEventListener('click', e => { if (e.target === $overlay) $overlay.cl
 $('modal-save').addEventListener('click', () => {
   systemPrompt = $sysInput.value.trim() || DEFAULT_SYSTEM
   $overlay.classList.add('hidden')
+  saveState()
 })
 
 // ─── Suggestions ─────────────────────────────────────────────
@@ -565,6 +730,52 @@ function scrollBottom() {
 
 function escHtml(t) {
   return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+}
+
+// ─── Persistence (localStorage) ───────────────────────────────
+function saveState() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(messages))
+    localStorage.setItem(STORAGE_SYS_KEY, systemPrompt)
+    localStorage.setItem(STORAGE_MODEL_KEY, currentModel)
+  } catch (e) { /* storage penuh / disabled, abaikan */ }
+}
+
+function loadState() {
+  try {
+    const savedMsgs  = localStorage.getItem(STORAGE_KEY)
+    const savedSys   = localStorage.getItem(STORAGE_SYS_KEY)
+    const savedModel = localStorage.getItem(STORAGE_MODEL_KEY)
+
+    if (savedSys) {
+      systemPrompt = savedSys
+      $sysInput.value = systemPrompt
+    }
+
+    if (savedModel) {
+      const opt = $modelMenu.querySelector(`.model-option[data-value="${savedModel}"]`)
+      if (opt) {
+        currentModel = savedModel
+        $modelLabel.textContent = currentModel
+        $modelMenu.querySelectorAll('.model-option').forEach(o => o.classList.remove('active'))
+        opt.classList.add('active')
+      }
+    }
+
+    if (savedMsgs) {
+      const parsed = JSON.parse(savedMsgs)
+      if (Array.isArray(parsed) && parsed.length) {
+        messages = parsed
+        $empty.style.display = 'none'
+        for (const m of messages) {
+          const bubble = addBubble(m.role, m.content)
+          if (m.role === 'assistant') bubble.innerHTML = renderMarkdown(m.content)
+        }
+        $clearBtn.disabled = false
+        scrollBottom()
+      }
+    }
+  } catch (e) { /* data korup, abaikan & mulai bersih */ }
 }
 
 function renderMarkdown(text) {
@@ -651,17 +862,32 @@ async function sendMessage() {
   messages.push({ role: 'user', content: text })
   addBubble('user', text)
   setLoading(true)
+  saveState()
 
   const aiBubble = addBubble('assistant', '')
   abortCtrl = new AbortController()
   let fullText = ''
 
   try {
+    const contextMessages = messages.slice(-MAX_CONTEXT_MESSAGES)
+
+    // Ambil token terbaru (auto-refresh oleh Supabase)
+    const { data: sessionData } = await sb.auth.getSession()
+    const accessToken = sessionData?.session?.access_token
+
+    if (!accessToken) {
+      showLogin()
+      throw new Error('Sesi login habis. Silakan login ulang.')
+    }
+
     const res = await fetch('/api/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+      },
       signal: abortCtrl.signal,
-      body: JSON.stringify({ messages, model: currentModel, systemPrompt }),
+      body: JSON.stringify({ messages: contextMessages, model: currentModel, systemPrompt }),
     })
 
     if (!res.ok) {
@@ -703,6 +929,7 @@ async function sendMessage() {
     aiBubble.innerHTML = renderMarkdown(fullText)
     scrollBottom()
     messages.push({ role: 'assistant', content: fullText })
+    saveState()
 
   } catch (err) {
     if (err.name === 'AbortError') {
@@ -713,12 +940,14 @@ async function sendMessage() {
         aiBubble.closest('.msg-row')?.remove()
         messages.pop()
       }
+      saveState()
     } else {
       const errBox = document.createElement('div')
       errBox.className = 'error-box'
       errBox.innerHTML = `<svg width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="flex-shrink:0"><circle cx="10" cy="10" r="8"/><path d="M10 6v4M10 14h.01"/></svg><span>${escHtml(err.message)}</span>`
       aiBubble.closest('.msg-row')?.replaceWith(errBox)
       messages.pop()
+      saveState()
     }
   } finally {
     setLoading(false)
@@ -726,6 +955,15 @@ async function sendMessage() {
     $input.focus()
   }
 }
+
+// ─── App initialization (called after login) ──────────────────
+let appInitialized = false
+function initApp() {
+  if (appInitialized) return
+  appInitialized = true
+  loadState()
+}
+
 </script>
 </body>
-</html>
+            </html>
