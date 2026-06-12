@@ -85,7 +85,7 @@ export default async function handler(req) {
         'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify({ model, messages: allMessages, stream: true, max_tokens: 2048 }),
-    }, 20000)
+    }, 45000)
   } catch (e) {
     return new Response(JSON.stringify({ error: 'FreeModel API timeout: ' + e.message }), { status: 504 })
   }
