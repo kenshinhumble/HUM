@@ -2,41 +2,21 @@ export const config = { runtime: 'edge' }
 
 const DAILY_MESSAGE_LIMIT = 30 // batas pesan per user per hari
 
-// ─── Verify Supabase JWT (HS256) tanpa library tambahan ────────
-async function verifyJWT(token, secret) {
-  try {
-    const [headerB64, payloadB64, sigB64] = token.split('.')
-    if (!headerB64 || !payloadB64 || !sigB64) return null
+// ─── Verifikasi token via Supabase Auth API ────────────────────
+async function getUserFromToken(token) {
+  const SUPABASE_URL = process.env.SUPABASE_URL
+  const ANON_KEY = process.env.SUPABASE_ANON_KEY
 
-    const data = `${headerB64}.${payloadB64}`
-    const sig = base64UrlToBytes(sigB64)
+  const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'apikey': ANON_KEY,
+    }
+  })
 
-    const key = await crypto.subtle.importKey(
-      'raw',
-      new TextEncoder().encode(secret),
-      { name: 'HMAC', hash: 'SHA-256' },
-      false,
-      ['verify']
-    )
-
-    const valid = await crypto.subtle.verify('HMAC', key, sig, new TextEncoder().encode(data))
-    if (!valid) return null
-
-    const payload = JSON.parse(atob(payloadB64.replace(/-/g, '+').replace(/_/g, '/')))
-    if (!payload.exp || payload.exp * 1000 < Date.now()) return null
-
-    return payload // { sub: userId, email, ... }
-  } catch {
-    return null
-  }
-}
-
-function base64UrlToBytes(b64url) {
-  const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/')
-  const bin = atob(b64)
-  const arr = new Uint8Array(bin.length)
-  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i)
-  return arr
+  if (!res.ok) return null
+  const user = await res.json()
+  return user?.id ? user : null
 }
 
 // ─── Usage limit check + increment via Supabase REST (PostgREST) ─
@@ -51,7 +31,6 @@ async function checkAndIncrementUsage(userId) {
     'Content-Type': 'application/json',
   }
 
-  // 1. Ambil count hari ini
   const getRes = await fetch(
     `${SUPABASE_URL}/rest/v1/usage_limits?user_id=eq.${userId}&date=eq.${today}&select=message_count`,
     { headers }
@@ -63,7 +42,6 @@ async function checkAndIncrementUsage(userId) {
     return { allowed: false, remaining: 0 }
   }
 
-  // 2. Upsert increment
   await fetch(`${SUPABASE_URL}/rest/v1/usage_limits?on_conflict=user_id,date`, {
     method: 'POST',
     headers: { ...headers, 'Prefer': 'resolution=merge-duplicates' },
@@ -95,13 +73,12 @@ export default async function handler(req) {
   if (!token)
     return new Response(JSON.stringify({ error: 'Belum login. Silakan login terlebih dahulu.' }), { status: 401 })
 
-  const jwtSecret = process.env.SUPABASE_JWT_SECRET
-  const payload = await verifyJWT(token, jwtSecret)
+  const user = await getUserFromToken(token)
 
-  if (!payload)
+  if (!user)
     return new Response(JSON.stringify({ error: 'Sesi login tidak valid atau sudah habis. Silakan login ulang.' }), { status: 401 })
 
-  const userId = payload.sub
+  const userId = user.id
 
   // ─── 2. Cek & catat kuota harian ───
   let usage
