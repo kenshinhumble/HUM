@@ -8,6 +8,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -192,7 +194,8 @@ header {
   background:rgba(45,212,191,.1); padding:2px 5px;
   border-radius:4px; color:var(--accent-soft);
 }
-.bubble.ai pre code { background:transparent; padding:0; color:#a8b8d0; font-size:1em; }
+.bubble.ai pre code { background:transparent !important; padding:0; font-size:1em; }
+.bubble.ai .code-wrap pre { padding-top:34px; }
 .bubble.ai strong { font-weight:600; color:#f0f4ff; }
 .bubble.ai em     { color:#94a3b8; font-style:italic; }
 .bubble.ai blockquote {
@@ -200,6 +203,46 @@ header {
   color:var(--muted); margin:.5em 0; font-style:italic;
 }
 .bubble.ai hr { border:none; border-top:1px solid var(--border); margin:.8em 0; }
+
+/* ─── Code block wrapper + copy button ─── */
+.code-wrap { position:relative; margin:8px 0; }
+.code-wrap pre { margin:0; }
+.code-copy-btn {
+  position:absolute; top:6px; right:6px; z-index:2;
+  display:flex; align-items:center; gap:5px;
+  background:var(--elevated); border:1px solid var(--border);
+  color:var(--muted); font-size:11px; font-family:'Inter',sans-serif;
+  padding:4px 8px; border-radius:var(--r-xs); cursor:pointer;
+  transition:color .15s, border-color .15s, background .15s;
+}
+.code-copy-btn:hover { color:var(--text); border-color:var(--border-hi); background:var(--input-bg); }
+.code-copy-btn svg { width:12px; height:12px; flex-shrink:0; }
+.code-copy-btn.copied { color:var(--accent); border-color:var(--accent); }
+.code-lang-label {
+  position:absolute; top:8px; left:14px; z-index:1;
+  font-size:10px; color:var(--muted); letter-spacing:.05em;
+  text-transform:uppercase; font-family:'JetBrains Mono',monospace;
+}
+
+/* ─── Bubble copy button (whole message) ─── */
+.bubble-wrap { display:flex; flex-direction:column; max-width:78%; }
+.bubble-wrap.ai-wrap { align-items:flex-start; }
+.bubble-wrap.ai-wrap .bubble { max-width: 100%; }
+.bubble-actions {
+  display:flex; gap:4px; margin-top:4px; opacity:0;
+  transition:opacity .15s; padding-left:2px;
+}
+.msg-row:hover .bubble-actions, .msg-row.show-actions .bubble-actions { opacity:1; }
+.bubble-action-btn {
+  display:flex; align-items:center; gap:4px;
+  background:transparent; border:none; color:var(--muted);
+  font-size:11px; font-family:'Inter',sans-serif; cursor:pointer;
+  padding:3px 6px; border-radius:var(--r-xs); transition:color .15s, background .15s;
+}
+.bubble-action-btn:hover { color:var(--text); background:var(--elevated); }
+.bubble-action-btn svg { width:12px; height:12px; }
+.bubble-action-btn.copied { color:var(--accent); }
+
 
 /* ─── Typewriter cursor ─── */
 .tw-cursor {
@@ -769,7 +812,10 @@ function loadState() {
         $empty.style.display = 'none'
         for (const m of messages) {
           const bubble = addBubble(m.role, m.content)
-          if (m.role === 'assistant') bubble.innerHTML = renderMarkdown(m.content)
+          if (m.role === 'assistant') {
+            bubble.innerHTML = renderMarkdown(m.content)
+            highlightCode(bubble)
+          }
         }
         $clearBtn.disabled = false
         scrollBottom()
@@ -781,8 +827,11 @@ function loadState() {
 function renderMarkdown(text) {
   let h = escHtml(text)
   // code blocks
-  h = h.replace(/```(\w*)\n?([\s\S]*?)```/g, (_,lang,code) =>
-    `<pre><code>${code.trim()}</code></pre>`)
+  h = h.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+    const langClass = lang ? ` class="language-${lang}"` : ''
+    const label = lang ? `<span class="code-lang-label">${lang}</span>` : ''
+    return `<div class="code-wrap">${label}<button class="code-copy-btn" type="button"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="9" height="9" rx="1.5"/><path d="M3 10.5V3a1 1 0 011-1h7.5"/></svg><span>Copy</span></button><pre><code${langClass}>${code.trim()}</code></pre></div>`
+  })
   // inline code
   h = h.replace(/`([^`\n]+)`/g, '<code>$1</code>')
   // headings
@@ -800,7 +849,7 @@ function renderMarkdown(text) {
   h = h.replace(/^\- (.+)$/gm, '<li>$1</li>')
   h = h.replace(/(<li>[\s\S]*?<\/li>)/g, '<ul>$1</ul>')
   // paragraphs (skip block elements)
-  const blockRe = /^(<h[1-3]>|<ul>|<ol>|<pre>|<blockquote>|<hr)/
+  const blockRe = /^(<h[1-3]>|<ul>|<ol>|<div class="code-wrap">|<blockquote>|<hr)/
   h = h.split('\n\n').map(p => {
     const t = p.trim()
     if (!t || blockRe.test(t)) return t
@@ -831,14 +880,86 @@ function addBubble(role, content) {
     row.appendChild(av)
   } else {
     bubble.innerHTML = '<span class="tw-cursor"></span>'
+
+    const wrap = document.createElement('div')
+    wrap.className = 'bubble-wrap ai-wrap'
+    wrap.appendChild(bubble)
+
+    const actions = document.createElement('div')
+    actions.className = 'bubble-actions'
+    actions.innerHTML =
+      '<button class="bubble-action-btn copy-msg-btn" type="button">' +
+        '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="9" height="9" rx="1.5"/><path d="M3 10.5V3a1 1 0 011-1h7.5"/></svg>' +
+        '<span>Copy</span>' +
+      '</button>'
+    wrap.appendChild(actions)
+
     row.appendChild(av)
-    row.appendChild(bubble)
+    row.appendChild(wrap)
   }
 
   $messages.appendChild(row)
   scrollBottom()
   return bubble
 }
+
+// ─── Syntax highlighting ───────────────────────────────────────
+function highlightCode(bubble) {
+  if (typeof hljs === 'undefined') return
+  bubble.querySelectorAll('pre code').forEach(block => {
+    try { hljs.highlightElement(block) } catch {}
+  })
+}
+
+// ─── Copy to clipboard helper ──────────────────────────────────
+function copyText(text, btn) {
+  const span = btn.querySelector('span')
+  const original = span ? span.textContent : ''
+
+  const done = () => {
+    btn.classList.add('copied')
+    if (span) span.textContent = 'Disalin!'
+    setTimeout(() => {
+      btn.classList.remove('copied')
+      if (span) span.textContent = original
+    }, 1500)
+  }
+
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done))
+  } else {
+    fallbackCopy(text, done)
+  }
+}
+
+function fallbackCopy(text, done) {
+  const ta = document.createElement('textarea')
+  ta.value = text
+  ta.style.position = 'fixed'
+  ta.style.opacity = '0'
+  document.body.appendChild(ta)
+  ta.select()
+  try { document.execCommand('copy') } catch {}
+  document.body.removeChild(ta)
+  done()
+}
+
+// ─── Event delegation: copy buttons (per code block & per message) ─
+$messages.addEventListener('click', e => {
+  const codeBtn = e.target.closest('.code-copy-btn')
+  if (codeBtn) {
+    const codeEl = codeBtn.parentElement.querySelector('pre code')
+    if (codeEl) copyText(codeEl.textContent, codeBtn)
+    return
+  }
+
+  const msgBtn = e.target.closest('.copy-msg-btn')
+  if (msgBtn) {
+    const bubble = msgBtn.closest('.bubble-wrap')?.querySelector('.bubble')
+    if (bubble) copyText(bubble.innerText, msgBtn)
+    return
+  }
+})
 
 // ─── Loading state ────────────────────────────────────────────
 function setLoading(val) {
@@ -927,6 +1048,7 @@ async function sendMessage() {
 
     // Setelah stream selesai, render markdown
     aiBubble.innerHTML = renderMarkdown(fullText)
+    highlightCode(aiBubble)
     scrollBottom()
     messages.push({ role: 'assistant', content: fullText })
     saveState()
@@ -935,6 +1057,7 @@ async function sendMessage() {
     if (err.name === 'AbortError') {
       if (fullText) {
         aiBubble.innerHTML = renderMarkdown(fullText)
+        highlightCode(aiBubble)
         messages.push({ role: 'assistant', content: fullText })
       } else {
         aiBubble.closest('.msg-row')?.remove()
@@ -966,4 +1089,4 @@ function initApp() {
 
 </script>
 </body>
-            </html>
+              </html>
