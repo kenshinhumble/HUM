@@ -10,6 +10,12 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<!-- marked + DOMPurify: versi dipin (bukan @latest) untuk supply-chain safety.
+     DOMPurify 3.3.3 sudah termasuk fix CVE-2026-0540 (>= 3.3.2 required).
+     Untuk SRI penuh: buka https://www.srihash.org , paste tiap URL <script> di atas
+     & di bawah, lalu tempel atribut integrity="..." yang dihasilkan ke tag terkait. -->
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.3.3/dist/purify.min.js"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -654,6 +660,11 @@ let messages    = []
 let systemPrompt = DEFAULT_SYSTEM
 let currentModel = 'gpt-5.4-mini'
 let isLoading   = false
+// abortCtrl: hanya ada 1 aktif di satu waktu. Aman dari race karena
+// `if (!text || isLoading) return` + `setLoading(true)` dieksekusi
+// SYNCHRONOUS sebelum await pertama — sendMessage() kedua yang
+// dipanggil saat masih loading akan langsung return, jadi tidak ada
+// kemungkinan 2 abortCtrl hidup bersamaan / overwrite tanpa sengaja.
 let abortCtrl   = null
 let twTimeout   = null
 
@@ -708,23 +719,28 @@ function updateInput() {
   $input.style.height = Math.min($input.scrollHeight, 150) + 'px'
 }
 
-$input.addEventListener('input', () => {
-  // Android: detect newline injected by soft keyboard
-  if ($input.value.includes('\n')) {
-    const cleaned = $input.value.replace(/\n/g, '')
-    $input.value = cleaned
-    updateInput()
-    if (cleaned.trim()) sendMessage()
-    return
-  }
-  updateInput()
+$input.addEventListener('input', updateInput)
+
+// ─── Enter = send, Shift+Enter = newline (multi-line) ──────────
+// Sebelumnya semua "\n" di-strip + auto-send → multi-line nggak
+// mungkin sama sekali (termasuk dari paste). Sekarang pakai
+// beforeinput supaya konsisten di desktop & Android:
+// - Enter polos          → kirim pesan
+// - Shift+Enter          → sisipkan newline (dibiarkan default)
+// - Newline dari paste    → tetap utuh, tidak di-strip
+let shiftHeld = false
+$input.addEventListener('keydown', e => {
+  if (e.key === 'Shift') shiftHeld = true
+})
+$input.addEventListener('keyup', e => {
+  if (e.key === 'Shift') shiftHeld = false
 })
 
-// Desktop Enter key
-$input.addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !e.shiftKey) {
+$input.addEventListener('beforeinput', e => {
+  if (e.inputType === 'insertLineBreak') {
+    if (shiftHeld || e.shiftKey) return // biarkan newline disisipkan
     e.preventDefault()
-    sendMessage()
+    if ($input.value.trim()) sendMessage()
   }
 })
 
@@ -773,6 +789,37 @@ function scrollBottom() {
 
 function escHtml(t) {
   return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+}
+
+// ─── Token helper: hindari refresh-token race antar tab ────────
+// Refresh token Supabase bersifat single-use & rotating. Kalau 2 tab
+// sama-sama refresh hampir bersamaan, salah satu bisa kena logout
+// karena refresh token-nya sudah dipakai tab lain.
+// Solusi: kalau access token MASIH valid > 2 menit, pakai langsung
+// (tanpa panggil getSession() yang bisa memicu refresh). Cuma minta
+// session baru kalau memang hampir/sudah expired.
+function decodeJwtExp(token) {
+  try {
+    const payload = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')
+    return JSON.parse(atob(payload)).exp || 0 // detik sejak epoch
+  } catch {
+    return 0
+  }
+}
+
+async function getValidAccessToken() {
+  const token = currentSession?.access_token
+  const exp = token ? decodeJwtExp(token) : 0
+  const now = Math.floor(Date.now() / 1000)
+
+  if (token && exp - now > 120) {
+    return token // masih valid > 2 menit, langsung pakai
+  }
+
+  // Hampir/sudah expired → minta session terbaru (Supabase auto-refresh di sini)
+  const { data } = await sb.auth.getSession()
+  currentSession = data?.session || null
+  return currentSession?.access_token || null
 }
 
 // ─── Persistence (localStorage) ───────────────────────────────
@@ -824,38 +871,36 @@ function loadState() {
   } catch (e) { /* data korup, abaikan & mulai bersih */ }
 }
 
+// ─── Markdown render: marked (parser) + DOMPurify (sanitizer) ──
+// Mengganti regex-based renderer lama (ReDoS-prone & salah wrap paragraf).
+marked.setOptions({ gfm: true, breaks: true })
+
+const SANITIZE_CONFIG = {
+  ALLOWED_TAGS: ['p','br','strong','em','del','code','pre','blockquote','hr',
+    'ul','ol','li','h1','h2','h3','h4','a','table','thead','tbody','tr','th','td','img','span'],
+  ALLOWED_ATTR: ['href','class','target','rel','src','alt'],
+}
+
 function renderMarkdown(text) {
-  let h = escHtml(text)
-  // code blocks
-  h = h.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
-    const langClass = lang ? ` class="language-${lang}"` : ''
+  const rawHtml = marked.parse(text || '')
+  const clean = DOMPurify.sanitize(rawHtml, SANITIZE_CONFIG)
+
+  // Bungkus tiap <pre><code> dengan wrapper + tombol Copy (mempertahankan UI lama)
+  const tmp = document.createElement('div')
+  tmp.innerHTML = clean
+  tmp.querySelectorAll('pre').forEach(pre => {
+    const code = pre.querySelector('code')
+    const langMatch = code?.className.match(/language-(\w+)/)
+    const lang = langMatch ? langMatch[1] : ''
     const label = lang ? `<span class="code-lang-label">${lang}</span>` : ''
-    return `<div class="code-wrap">${label}<button class="code-copy-btn" type="button"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="9" height="9" rx="1.5"/><path d="M3 10.5V3a1 1 0 011-1h7.5"/></svg><span>Copy</span></button><pre><code${langClass}>${code.trim()}</code></pre></div>`
+    const wrap = document.createElement('div')
+    wrap.className = 'code-wrap'
+    wrap.innerHTML = `${label}<button class="code-copy-btn" type="button"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="9" height="9" rx="1.5"/><path d="M3 10.5V3a1 1 0 011-1h7.5"/></svg><span>Copy</span></button>`
+    pre.replaceWith(wrap)
+    wrap.appendChild(pre)
   })
-  // inline code
-  h = h.replace(/`([^`\n]+)`/g, '<code>$1</code>')
-  // headings
-  h = h.replace(/^### (.+)$/gm, '<h3>$1</h3>')
-  h = h.replace(/^## (.+)$/gm,  '<h2>$1</h2>')
-  h = h.replace(/^# (.+)$/gm,   '<h1>$1</h1>')
-  // bold / italic
-  h = h.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-  h = h.replace(/\*(.+?)\*/g,     '<em>$1</em>')
-  // blockquote
-  h = h.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>')
-  // hr
-  h = h.replace(/^---$/gm, '<hr>')
-  // unordered list items → wrap later
-  h = h.replace(/^\- (.+)$/gm, '<li>$1</li>')
-  h = h.replace(/(<li>[\s\S]*?<\/li>)/g, '<ul>$1</ul>')
-  // paragraphs (skip block elements)
-  const blockRe = /^(<h[1-3]>|<ul>|<ol>|<div class="code-wrap">|<blockquote>|<hr)/
-  h = h.split('\n\n').map(p => {
-    const t = p.trim()
-    if (!t || blockRe.test(t)) return t
-    return `<p>${t.replace(/\n/g,'<br>')}</p>`
-  }).join('')
-  return h
+
+  return tmp.innerHTML
 }
 
 
@@ -972,6 +1017,20 @@ function setLoading(val) {
   $modelTrig.disabled = val
 }
 
+// ─── bfcache fix ────────────────────────────────────────────────
+// Kalau user navigate away lalu balik (tombol back), browser bisa
+// restore halaman dari bfcache dengan state JS "beku" (isLoading
+// masih true, abortCtrl basi, dll) padahal UI keliatan normal.
+// Reset semua state terkait loading saat halaman direstore.
+window.addEventListener('pageshow', e => {
+  if (e.persisted) {
+    if (twTimeout) { clearTimeout(twTimeout); twTimeout = null }
+    abortCtrl?.abort()
+    abortCtrl = null
+    setLoading(false)
+  }
+})
+
 // ─── Fetch dengan retry (exponential backoff 3x: 1s, 2s, 4s) ──
 // Retry hanya untuk server error (5xx) atau network error,
 // tidak untuk 4xx (401/429) dan tidak kalau user pencet Stop.
@@ -1018,9 +1077,8 @@ async function sendMessage() {
   try {
     const contextMessages = messages.slice(-MAX_CONTEXT_MESSAGES)
 
-    // Ambil token terbaru (auto-refresh oleh Supabase)
-    const { data: sessionData } = await sb.auth.getSession()
-    const accessToken = sessionData?.session?.access_token
+    // Ambil token (pakai cache kalau masih valid > 2 menit, hindari refresh race)
+    const accessToken = await getValidAccessToken()
 
     if (!accessToken) {
       showLogin()
@@ -1048,31 +1106,46 @@ async function sendMessage() {
     const reader = res.body.getReader()
     const decoder = new TextDecoder()
     let buffer = ''
+    let streamDone = false
+
+    function processLine(line) {
+      if (!line || line.startsWith(':')) return // SSE comment / keep-alive ping, abaikan
+      if (!line.startsWith('data: ')) return
+      const raw = line.slice(6).trim()
+      if (!raw) return // empty `data:` line, abaikan
+      if (raw === '[DONE]') { streamDone = true; return }
+
+      try {
+        const parsed = JSON.parse(raw)
+        const delta = parsed.choices?.[0]?.delta?.content || ''
+        if (delta) {
+          fullText += delta
+          // Tampil teks mentah + cursor saat streaming berlangsung
+          aiBubble.innerHTML = escHtml(fullText) + '<span class="tw-cursor"></span>'
+          scrollBottom()
+        }
+      } catch (e) {
+        console.warn('SSE parse error:', e, raw)
+      }
+    }
 
     while (true) {
       const { done, value } = await reader.read()
-      if (done) break
+      if (done) {
+        // Proses sisa buffer (chunk terakhir bisa datang tanpa trailing \n)
+        if (buffer) processLine(buffer)
+        break
+      }
 
       buffer += decoder.decode(value, { stream: true })
       const lines = buffer.split('\n')
       buffer = lines.pop() // baris yang belum lengkap, simpan dulu
 
       for (const line of lines) {
-        if (!line.startsWith('data: ')) continue
-        const raw = line.slice(6).trim()
-        if (raw === '[DONE]') break
-
-        try {
-          const parsed = JSON.parse(raw)
-          const delta = parsed.choices?.[0]?.delta?.content || ''
-          if (delta) {
-            fullText += delta
-            // Tampil teks mentah + cursor saat streaming berlangsung
-            aiBubble.innerHTML = escHtml(fullText) + '<span class="tw-cursor"></span>'
-            scrollBottom()
-          }
-        } catch { /* skip chunk rusak */ }
+        processLine(line)
+        if (streamDone) break
       }
+      if (streamDone) break
     }
 
     // Setelah stream selesai, render markdown
