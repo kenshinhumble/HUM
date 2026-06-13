@@ -972,6 +972,32 @@ function setLoading(val) {
   $modelTrig.disabled = val
 }
 
+// ─── Fetch dengan retry (exponential backoff 3x: 1s, 2s, 4s) ──
+// Retry hanya untuk server error (5xx) atau network error,
+// tidak untuk 4xx (401/429) dan tidak kalau user pencet Stop.
+async function fetchWithRetry(url, options, onRetry) {
+  const delays = [1000, 2000, 4000]
+  for (let attempt = 0; attempt <= delays.length; attempt++) {
+    try {
+      const res = await fetch(url, options)
+      if (res.status >= 500 && attempt < delays.length) {
+        onRetry?.(attempt + 1, delays.length)
+        await new Promise(r => setTimeout(r, delays[attempt]))
+        continue
+      }
+      return res
+    } catch (e) {
+      if (options.signal?.aborted) throw e
+      if (attempt < delays.length) {
+        onRetry?.(attempt + 1, delays.length)
+        await new Promise(r => setTimeout(r, delays[attempt]))
+        continue
+      }
+      throw e
+    }
+  }
+}
+
 // ─── Send message (real streaming) ───────────────────────────
 async function sendMessage() {
   const text = $input.value.trim()
@@ -1001,7 +1027,7 @@ async function sendMessage() {
       throw new Error('Sesi login habis. Silakan login ulang.')
     }
 
-    const res = await fetch('/api/chat', {
+    const res = await fetchWithRetry('/api/chat', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1009,6 +1035,9 @@ async function sendMessage() {
       },
       signal: abortCtrl.signal,
       body: JSON.stringify({ messages: contextMessages, model: currentModel, systemPrompt }),
+    }, (attempt, max) => {
+      aiBubble.innerHTML = `<span style="color:var(--muted);font-size:12.5px">Koneksi gagal, mencoba lagi... (${attempt}/${max})</span><span class="tw-cursor"></span>`
+      scrollBottom()
     })
 
     if (!res.ok) {
