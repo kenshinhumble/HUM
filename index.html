@@ -301,16 +301,19 @@ const MAX_CONTEXT_MESSAGES = 20 // jumlah pesan terakhir yang dikirim ke API
 
 // ─── State ───────────────────────────────────────────────────
 let messages    = []
-let systemPrompt = DEFAULT_SYSTEM
-let currentModel = 'gpt-5.4-mini'
-let isLoading   = false
-// abortCtrl: hanya ada 1 aktif di satu waktu. Aman dari race karena
-// `if (!text || isLoading) return` + `setLoading(true)` dieksekusi
-// SYNCHRONOUS sebelum await pertama — sendMessage() kedua yang
-// dipanggil saat masih loading akan langsung return, jadi tidak ada
-// kemungkinan 2 abortCtrl hidup bersamaan / overwrite tanpa sengaja.
-let abortCtrl   = null
-let twTimeout   = null
+let systemPrompt  = DEFAULT_SYSTEM
+let currentModel  = 'gpt-5.4-mini'
+let isLoading     = false
+let abortCtrl     = null
+let twTimeout     = null
+
+// ─── Multi-thread state ──────────────────────────────────────
+let currentConvId = localStorage.getItem('hum_current_conv') || null
+let conversationsMeta = []   // dari Turso
+let isSidebarOpen = false
+let syncDebounceTimer = null
+let tursoOnline = true
+
 
 // ─── DOM refs ────────────────────────────────────────────────
 const $ = id => document.getElementById(id)
