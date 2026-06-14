@@ -294,9 +294,11 @@ sb.auth.onAuthStateChange((event, session) => {
 const DEFAULT_SYSTEM = 'Kamu adalah HUM (Humble Utility Machine) — asisten AI yang rendah hati, cerdas, dan selalu berusaha memberikan jawaban yang benar-benar berguna. Kamu tidak pernah sombong, selalu jujur jika tidak tahu, dan senang membantu siapa saja. Jawab dengan jelas, ringkas, dan hangat. Gunakan Bahasa Indonesia kecuali user minta bahasa lain.'
 
 const TYPEWRITER_SPEED = 10 // ms per char (lower = faster)
-const STORAGE_KEY = 'hum_chat_history_v1'
 const STORAGE_SYS_KEY = 'hum_system_prompt_v1'
 const STORAGE_MODEL_KEY = 'hum_model_v1'
+const STORAGE_CONV_LIST = 'hum_conv_list'
+const STORAGE_CURRENT_CONV = 'hum_current_conv'
+
 const MAX_CONTEXT_MESSAGES = 20 // jumlah pesan terakhir yang dikirim ke API
 
 // ─── State ───────────────────────────────────────────────────
@@ -317,17 +319,14 @@ let tursoOnline = true
 
 // ─── DOM refs ────────────────────────────────────────────────
 const $ = id => document.getElementById(id)
-const $messages   = $('messages')
-const $empty      = $('empty')
-const $input      = $('input')
-const $sendBtn    = $('send-btn')
-const $stopBtn    = $('stop-btn')
-const $clearBtn   = $('clear-btn')
-const $overlay    = $('overlay')
-const $sysInput   = $('system-input')
-const $modelMenu  = $('model-menu')
-const $modelTrig  = $('model-trigger')
-const $modelLabel = $('model-label')
+const $sidebar      = document.getElementById('sidebar')
+const $convList     = document.getElementById('conv-list')
+const $sidebarToggle = document.getElementById('sidebar-toggle')
+const $sidebarOpen  = document.getElementById('sidebar-open')
+const $newChatBtn   = document.getElementById('new-chat-btn')
+const $syncStatus   = document.getElementById('sync-status')
+const $sidebarOverlay = document.getElementById('sidebar-overlay')
+
 
 $sysInput.value = systemPrompt
 
@@ -365,6 +364,206 @@ function updateInput() {
   $input.style.height = 'auto'
   $input.style.height = Math.min($input.scrollHeight, 150) + 'px'
 }
+     // ─── UUID helper ─────────────────────────────────────────────
+function generateId() {
+  return crypto.randomUUID ? crypto.randomUUID()
+    : ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g,c=>(c^crypto.getRandomValues(new Uint8Array(1))[0]&15>>c/4).toString(16))
+}
+
+// ─── Conversation storage helpers ────────────────────────────
+function getConvKey(id) { return 'hum_conv_' + id }
+function getConvMessages(id) {
+  try { return JSON.parse(localStorage.getItem(getConvKey(id)) || '[]') }
+  catch { return [] }
+}
+function setConvMessages(id, msgs) {
+  localStorage.setItem(getConvKey(id), JSON.stringify(msgs))
+}
+
+// ─── Sidebar toggle ──────────────────────────────────────────
+function toggleSidebar() {
+  isSidebarOpen = !isSidebarOpen
+  $sidebar.classList.toggle('open', isSidebarOpen)
+  $sidebarOverlay.classList.toggle('open', isSidebarOpen)
+  document.body.classList.toggle('sidebar-open', isSidebarOpen)
+}
+
+$sidebarToggle?.addEventListener('click', toggleSidebar)
+$sidebarOpen?.addEventListener('click', toggleSidebar)
+$sidebarOverlay?.addEventListener('click', toggleSidebar)
+
+// ─── New chat ────────────────────────────────────────────────
+function startNewChat() {
+  currentConvId = generateId()
+  localStorage.setItem(STORAGE_CURRENT_CONV, currentConvId)
+  messages = []
+  document.querySelectorAll('.msg-row, .error-box').forEach(el => el.remove())
+  $empty.style.display = ''
+  $clearBtn.disabled = true
+  renderSidebar()
+  saveCurrentLocal()
+}
+
+$newChatBtn?.addEventListener('click', startNewChat)
+
+// ─── Save current conversation ─────────────────────────────────
+function saveCurrentLocal() {
+  if (!currentConvId) currentConvId = generateId()
+  const title = messages.length > 0
+    ? (messages[0].content.slice(0, 40) || 'New Chat')
+    : 'New Chat'
+  const meta = {
+    id: currentConvId,
+    title,
+    model: currentModel,
+    system_prompt: systemPrompt,
+    updated_at: Date.now(),
+  }
+  setConvMessages(currentConvId, messages)
+  let list = JSON.parse(localStorage.getItem(STORAGE_CONV_LIST) || '[]')
+  list = list.filter(c => c.id !== currentConvId)
+  list.unshift(meta)
+  localStorage.setItem(STORAGE_CONV_LIST, JSON.stringify(list.slice(0, 100)))
+  renderSidebar()
+  scheduleSync()
+}
+
+// ─── Load conversation ───────────────────────────────────────
+function loadConversation(id) {
+  currentConvId = id
+  localStorage.setItem(STORAGE_CURRENT_CONV, id)
+  messages = getConvMessages(id)
+  renderMessages()
+  $empty.style.display = 'none'
+  $clearBtn.disabled = messages.length === 0
+  renderSidebar()
+  if (window.innerWidth < 768) toggleSidebar()
+}
+
+// ─── Render all messages ─────────────────────────────────────
+function renderMessages() {
+  document.querySelectorAll('.msg-row, .error-box').forEach(el => el.remove())
+  for (const m of messages) {
+    const bubble = addBubble(m.role, m.content)
+    if (m.role === 'assistant') {
+      bubble.innerHTML = renderMarkdown(m.content)
+      highlightCode(bubble)
+    }
+  }
+  scrollBottom()
+}
+
+// ─── Render sidebar list ─────────────────────────────────────
+function renderSidebar() {
+  const localList = JSON.parse(localStorage.getItem(STORAGE_CONV_LIST) || '[]')
+  const map = new Map()
+  for (const c of [...conversationsMeta, ...localList]) {
+    if (!map.has(c.id)) map.set(c.id, c)
+    else if (c.updated_at > map.get(c.id).updated_at) map.set(c.id, c)
+  }
+  const sorted = Array.from(map.values()).sort((a, b) => b.updated_at - a.updated_at)
+
+  $convList.innerHTML = sorted.map(c => `
+    <div class="conv-item ${c.id === currentConvId ? 'active' : ''}" data-id="${escHtml(c.id)}">
+      <div class="conv-title">${escHtml(c.title || 'New Chat')}</div>
+      <div class="conv-meta">${new Date(c.updated_at).toLocaleDateString()}</div>
+      <button class="conv-del" data-id="${escHtml(c.id)}" title="Delete" type="button">×</button>
+    </div>
+  `).join('')
+
+  $convList.querySelectorAll('.conv-item').forEach(el => {
+    el.addEventListener('click', e => {
+      if (e.target.closest('.conv-del')) return
+      loadConversation(el.dataset.id)
+    })
+  })
+  $convList.querySelectorAll('.conv-del').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      e.stopPropagation()
+      const id = btn.dataset.id
+      if (!confirm('Hapus percakapan ini?')) return
+      localStorage.removeItem(getConvKey(id))
+      let list = JSON.parse(localStorage.getItem(STORAGE_CONV_LIST) || '[]')
+      localStorage.setItem(STORAGE_CONV_LIST, JSON.stringify(list.filter(c => c.id !== id)))
+      try {
+        await fetch('/api/sync?conv=' + encodeURIComponent(id), {
+          method: 'DELETE',
+          headers: { 'Authorization': 'Bearer ' + (currentSession?.access_token || '') },
+        })
+      } catch {}
+      if (currentConvId === id) startNewChat()
+      else renderSidebar()
+    })
+  })
+}
+
+// ─── Sync to Turso (debounced) ──────────────────────────────
+function scheduleSync() {
+  clearTimeout(syncDebounceTimer)
+  syncDebounceTimer = setTimeout(syncToTurso, 3000)
+}
+
+async function syncToTurso() {
+  if (!currentSession?.access_token || !currentConvId) return
+  const payload = {
+    conversation: {
+      id: currentConvId,
+      title: messages[0]?.content?.slice(0, 60) || 'New Chat',
+      model: currentModel,
+      system_prompt: systemPrompt,
+      created_at: messages[0]?.created_at || Date.now(),
+    },
+    messages: messages.map(m => ({
+      role: m.role,
+      content: m.content,
+      created_at: m.created_at || Date.now(),
+    })),
+  }
+  try {
+    const res = await fetch('/api/sync', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + currentSession.access_token,
+      },
+      body: JSON.stringify(payload),
+    })
+    if (res.ok) {
+      tursoOnline = true
+      $syncStatus.textContent = '● synced'
+      $syncStatus.className = 'sync-status online'
+      fetchSidebarList()
+    } else {
+      throw new Error('sync failed')
+    }
+  } catch (e) {
+    tursoOnline = false
+    $syncStatus.textContent = '● offline'
+    $syncStatus.className = 'sync-status offline'
+  }
+}
+
+async function fetchSidebarList() {
+  if (!currentSession?.access_token) return
+  try {
+    const res = await fetch('/api/sync?list=1', {
+      headers: { 'Authorization': 'Bearer ' + currentSession.access_token },
+    })
+    if (res.ok) {
+      const data = await res.json()
+      conversationsMeta = data.conversations || []
+      tursoOnline = true
+      $syncStatus.textContent = '● synced'
+      $syncStatus.className = 'sync-status online'
+      renderSidebar()
+    }
+  } catch {
+    tursoOnline = false
+    $syncStatus.textContent = '● offline'
+    $syncStatus.className = 'sync-status offline'
+  }
+}
+
 
 $input.addEventListener('input', updateInput)
 
@@ -404,8 +603,14 @@ $clearBtn.addEventListener('click', () => {
   document.querySelectorAll('.msg-row, .error-box').forEach(el => el.remove())
   $empty.style.display = ''
   $clearBtn.disabled = true
-  localStorage.removeItem(STORAGE_KEY)
+  if (currentConvId) {
+    localStorage.removeItem(getConvKey(currentConvId))
+    let list = JSON.parse(localStorage.getItem(STORAGE_CONV_LIST) || '[]')
+    localStorage.setItem(STORAGE_CONV_LIST, JSON.stringify(list.filter(c => c.id !== currentConvId)))
+  }
+  startNewChat()
 })
+
 
 // ─── Settings modal ───────────────────────────────────────────
 $('settings-btn').addEventListener('click', () => {
@@ -471,16 +676,12 @@ async function getValidAccessToken() {
 
 // ─── Persistence (localStorage) ───────────────────────────────
 function saveState() {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(messages))
-    localStorage.setItem(STORAGE_SYS_KEY, systemPrompt)
-    localStorage.setItem(STORAGE_MODEL_KEY, currentModel)
-  } catch (e) { /* storage penuh / disabled, abaikan */ }
+  saveCurrentLocal()
 }
+
 
 function loadState() {
   try {
-    const savedMsgs  = localStorage.getItem(STORAGE_KEY)
     const savedSys   = localStorage.getItem(STORAGE_SYS_KEY)
     const savedModel = localStorage.getItem(STORAGE_MODEL_KEY)
 
@@ -499,10 +700,9 @@ function loadState() {
       }
     }
 
-    if (savedMsgs) {
-      const parsed = JSON.parse(savedMsgs)
-      if (Array.isArray(parsed) && parsed.length) {
-        messages = parsed
+    if (currentConvId) {
+      messages = getConvMessages(currentConvId)
+      if (messages.length) {
         $empty.style.display = 'none'
         for (const m of messages) {
           const bubble = addBubble(m.role, m.content)
@@ -515,8 +715,11 @@ function loadState() {
         scrollBottom()
       }
     }
-  } catch (e) { /* data korup, abaikan & mulai bersih */ }
+    renderSidebar()
+    fetchSidebarList()
+  } catch (e) { /* data korup, abaikan */ }
 }
+
 
 // ─── Markdown render: marked (parser) + DOMPurify (sanitizer) ──
 // Mengganti regex-based renderer lama (ReDoS-prone & salah wrap paragraf).
@@ -712,7 +915,8 @@ async function sendMessage() {
   $input.value = ''
   $input.style.height = 'auto'
 
-  messages.push({ role: 'user', content: text })
+  messages.push({ role: 'user', content: text, created_at: Date.now() })
+
   addBubble('user', text)
   setLoading(true)
   saveState()
@@ -807,7 +1011,8 @@ async function sendMessage() {
       if (fullText) {
         aiBubble.innerHTML = renderMarkdown(fullText)
         highlightCode(aiBubble)
-        messages.push({ role: 'assistant', content: fullText })
+        messages.push({ role: 'assistant', content: fullText, created_at: Date.now() })
+
       } else {
         aiBubble.closest('.msg-row')?.remove()
         messages.pop()
@@ -834,7 +1039,11 @@ function initApp() {
   if (appInitialized) return
   appInitialized = true
   loadState()
+  setInterval(() => {
+    if (messages.length && currentConvId) syncToTurso()
+  }, 30000)
 }
+
 
 </script>
 </body>
