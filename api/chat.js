@@ -10,7 +10,11 @@ const ALLOWED_ORIGINS = [
 // Bisa override / tambah lewat env var ALLOWED_ORIGIN (opsional)
 if (process.env.ALLOWED_ORIGIN) ALLOWED_ORIGINS.push(process.env.ALLOWED_ORIGIN)
 
-const FALLBACK_MODEL = 'gpt-5.4-mini' // model tercepat, dipakai kalau model utama 504/timeout
+const FALLBACK_MODEL = 'gpt-5.4-mini' // fallback FreeModel kalau timeout
+// Model NVIDIA NIM dikenali dari nama yang mengandung '/' (namespace/model)
+const NVIDIA_BASE = 'https://integrate.api.nvidia.com/v1/chat/completions'
+const FREEMODEL_BASE = 'https://api.freemodel.dev/v1/chat/completions'
+const isNvidiaModel = (m) => m.includes('/')
 const PING_INTERVAL_MS = 5000         // keep-alive ping setiap 5 detik (SSE comment, diabaikan client)
 const RATE_LIMIT_MAX = 10             // max request
 const RATE_LIMIT_WINDOW_MS = 60_000   // per 60 detik, per user
@@ -78,6 +82,19 @@ async function getUserFromToken(token) {
   if (!res.ok) return null
   const user = await res.json()
   return user?.id ? user : null
+}
+
+// ─── Panggil NVIDIA NIM API ──────────────────────────────────────
+async function callNvidia(apiKey, model, allMessages) {
+  const res = await fetchWithTimeout(NVIDIA_BASE, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({ model, messages: allMessages, stream: true, max_tokens: 4096 }),
+  }, 60000)
+  return { res, usedModel: model }
 }
 
 // ─── Panggil FreeModel, auto fallback ke model cepat kalau 504/timeout ───
@@ -162,7 +179,6 @@ export default async function handler(req) {
       headers: { ...corsHeaders(origin), 'Content-Type': 'application/json' }
     })
 
-  // ─── DEBUG: cek env vars dulu ───
   const missingEnv = []
   if (!process.env.SUPABASE_URL) missingEnv.push('SUPABASE_URL')
   if (!process.env.SUPABASE_ANON_KEY) missingEnv.push('SUPABASE_ANON_KEY')
@@ -213,8 +229,7 @@ export default async function handler(req) {
     })
   }
 
-  // ─── 3. Proxy ke FreeModel API (dengan fallback model) ───
-  const apiKey = process.env.FREEMODEL_API_KEY
+  // ─── 3. Route ke NVIDIA NIM atau FreeModel berdasarkan model ───
   const { messages, model = 'gpt-5.4-mini', systemPrompt } = await req.json()
 
   const allMessages = systemPrompt
@@ -223,18 +238,31 @@ export default async function handler(req) {
 
   let upstream, usedModel
   try {
-    const result = await callFreeModel(apiKey, model, allMessages)
-    upstream = result.res
-    usedModel = result.usedModel
+    if (isNvidiaModel(model)) {
+      const nvidiaKey = process.env.NVIDIA_API_KEY
+      if (!nvidiaKey) {
+        return new Response(JSON.stringify({ error: 'NVIDIA_API_KEY belum diset di Vercel env.' }), {
+          status: 500, headers: { ...corsHeaders(origin), 'Content-Type': 'application/json' }
+        })
+      }
+      const result = await callNvidia(nvidiaKey, model, allMessages)
+      upstream = result.res
+      usedModel = result.usedModel
+    } else {
+      const freeKey = process.env.FREEMODEL_API_KEY
+      const result = await callFreeModel(freeKey, model, allMessages)
+      upstream = result.res
+      usedModel = result.usedModel
+    }
   } catch (e) {
-    return new Response(JSON.stringify({ error: 'FreeModel API timeout: ' + e.message }), {
+    return new Response(JSON.stringify({ error: 'API timeout: ' + e.message }), {
       status: 504, headers: { ...corsHeaders(origin), 'Content-Type': 'application/json' }
     })
   }
 
   if (!upstream.ok) {
     const err = await upstream.text()
-    return new Response(JSON.stringify({ error: `FreeModel error (${upstream.status}): ${err}` }), {
+    return new Response(JSON.stringify({ error: `API error (${upstream.status}): ${err}` }), {
       status: upstream.status, headers: { ...corsHeaders(origin), 'Content-Type': 'application/json' }
     })
   }
