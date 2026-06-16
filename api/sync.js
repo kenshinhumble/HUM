@@ -48,8 +48,8 @@ async function tursoQuery(sql, args = []) {
   }
   const data = await res.json()
   // Turso v2 pipeline response shape
-  const results = data?.results?.[0]?.response?.result?.rows ?? []
-  return results
+  const result = data?.results?.[0]?.response?.result
+  return { cols: result?.cols ?? [], rows: result?.rows ?? [] }
 }
 
 function rowToObj(row, cols) {
