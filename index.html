@@ -1,1 +1,1074 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>HUM — Humble Utility Machine</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<!-- marked + DOMPurify: versi dipin (bukan @latest) untuk supply-chain safety.
+     DOMPurify 3.3.3 sudah termasuk fix CVE-2026-0540 (>= 3.3.2 required).
+     Untuk SRI penuh: buka https://www.srihash.org , paste tiap URL <script> di atas
+     & di bawah, lalu tempel atribut integrity="..." yang dihasilkan ke tag terkait. -->
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.3.3/dist/purify.min.js"></script>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ═══ LOGIN SCREEN ═══ -->
+<div id="login-screen">
+  <svg class="logo-icon-big" width="48" height="32" viewBox="0 0 36 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0"  y="10" width="4" height="4"  rx="2" fill="#2dd4bf" opacity=".35"/>
+    <rect x="6"  y="6"  width="4" height="12" rx="2" fill="#2dd4bf" opacity=".55"/>
+    <rect x="12" y="1"  width="4" height="22" rx="2" fill="#2dd4bf"/>
+    <rect x="18" y="4"  width="4" height="16" rx="2" fill="#2dd4bf" opacity=".75"/>
+    <rect x="24" y="7"  width="4" height="10" rx="2" fill="#2dd4bf" opacity=".5"/>
+    <rect x="30" y="10" width="4" height="4"  rx="2" fill="#2dd4bf" opacity=".25"/>
+  </svg>
+  <h1>HUM</h1>
+  <p>Humble Utility Machine — masuk dengan Google untuk mulai chat dan menyimpan riwayat percakapanmu.</p>
+  <button class="google-btn" id="google-login-btn" type="button">
+    <svg viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.99.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+    Masuk dengan Google
+  </button>
+  <p class="login-loading hidden" id="login-loading">Menghubungkan...</p>
+</div>
+
+     <!-- ═══ SIDEBAR ═══ -->
+<aside id="sidebar">
+  <div class="sidebar-head">
+    <button id="new-chat-btn" class="sidebar-new" type="button">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      New Chat
+    </button>
+    <button id="sidebar-toggle" class="icon-btn" title="Toggle sidebar" type="button">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+    </button>
+  </div>
+  <div id="conv-list" class="conv-list"></div>
+  <div class="sidebar-foot">
+    <span id="sync-status" class="sync-status">● local</span>
+  </div>
+</aside>
+<div id="sidebar-overlay"></div>
+
+<div id="app">
+
+  <!-- ═══ HEADER ═══ -->
+    <header>
+    <div style="display:flex;align-items:center;gap:10px;">
+      <button id="sidebar-open" class="icon-btn" title="Open sidebar" type="button">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
+      <div class="logo">
+        <svg class="logo-icon" width="34" height="24" viewBox="0 0 36 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="0"  y="10" width="4" height="4"  rx="2" fill="#2dd4bf" opacity=".35"/>
+          <rect x="6"  y="6"  width="4" height="12" rx="2" fill="#2dd4bf" opacity=".55"/>
+          <rect x="12" y="1"  width="4" height="22" rx="2" fill="#2dd4bf"/>
+          <rect x="18" y="4"  width="4" height="16" rx="2" fill="#2dd4bf" opacity=".75"/>
+          <rect x="24" y="7"  width="4" height="10" rx="2" fill="#2dd4bf" opacity=".5"/>
+          <rect x="30" y="10" width="4" height="4"  rx="2" fill="#2dd4bf" opacity=".25"/>
+        </svg>
+        <div class="logo-text">
+          <span class="logo-name">HUM</span>
+          <span class="logo-sub">Humble Utility Machine</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="header-right">
+      <!-- Custom model dropdown -->
+      <div class="model-wrap">
+        <button class="model-trigger" id="model-trigger" type="button">
+          <span class="model-dot"></span>
+          <span id="model-label">gpt-5.4-mini</span>
+          <!-- Chevron down -->
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12">
+            <path d="M4 6l4 4 4-4"/>
+          </svg>
+        </button>
+        <div class="model-menu" id="model-menu">
+          <div class="model-group-label">Model</div>
+          <div class="model-option active" data-value="gpt-5.4-mini">
+            <svg class="model-check" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8l3.5 3.5L13 4"/></svg>
+            <div>
+              <div class="m-name">gpt-5.4-mini</div>
+            </div>
+            <span class="m-tag">Fast</span>
+          </div>
+          <div class="model-option" data-value="gpt-5.4">
+            <svg class="model-check" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8l3.5 3.5L13 4"/></svg>
+            <div>
+              <div class="m-name">gpt-5.4</div>
+            </div>
+            <span class="m-tag">Balanced</span>
+          </div>
+          <div class="model-option" data-value="gpt-5.5">
+            <svg class="model-check" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8l3.5 3.5L13 4"/></svg>
+            <div>
+              <div class="m-name">gpt-5.5</div>
+            </div>
+            <span class="m-tag">Powerful</span>
+          </div>
+          <div class="model-option" data-value="gpt-5.3-codex">
+            <svg class="model-check" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8l3.5 3.5L13 4"/></svg>
+            <div>
+              <div class="m-name">gpt-5.3-codex</div>
+            </div>
+            <span class="m-tag">Code</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Settings button -->
+      <button class="icon-btn" id="settings-btn" type="button" title="System Prompt">
+        <!-- Sliders icon -->
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+          <line x1="3" y1="5"  x2="17" y2="5"/>
+          <line x1="3" y1="10" x2="17" y2="10"/>
+          <line x1="3" y1="15" x2="17" y2="15"/>
+          <circle cx="7"  cy="5"  r="2" fill="currentColor" stroke="none"/>
+          <circle cx="13" cy="10" r="2" fill="currentColor" stroke="none"/>
+          <circle cx="8"  cy="15" r="2" fill="currentColor" stroke="none"/>
+        </svg>
+      </button>
+
+      <!-- Clear button -->
+      <button class="icon-btn" id="clear-btn" type="button" title="Clear chat" disabled>
+        <!-- Trash icon -->
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 5h14M8 5V3.5a.5.5 0 01.5-.5h3a.5.5 0 01.5.5V5M6 5l1 11a1 1 0 001 1h4a1 1 0 001-1l1-11"/>
+          <line x1="8.5" y1="8.5" x2="8.5" y2="13.5"/>
+          <line x1="11.5" y1="8.5" x2="11.5" y2="13.5"/>
+        </svg>
+      </button>
+
+      <!-- User menu -->
+      <div class="model-wrap">
+        <button class="user-btn" id="user-btn" type="button" title="Akun">
+          <img id="user-avatar" src="" alt="">
+        </button>
+        <div class="user-menu" id="user-menu">
+          <div class="user-menu-email" id="user-email">-</div>
+          <div class="user-menu-item" id="logout-btn">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M7 17H4a1 1 0 01-1-1V4a1 1 0 011-1h3M13 14l4-4-4-4M17 10H7"/>
+            </svg>
+            Keluar
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ═══ MESSAGES ═══ -->
+  <div id="messages">
+    <div id="empty">
+      <div class="empty-icon">
+        <!-- Sparkle/star icon for empty state -->
+        <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+          <path d="M24 4 L26.5 20 L42 24 L26.5 28 L24 44 L21.5 28 L6 24 L21.5 20 Z" fill="#2dd4bf" opacity=".7"/>
+          <circle cx="38" cy="10" r="3" fill="#2dd4bf" opacity=".4"/>
+          <circle cx="10" cy="36" r="2" fill="#2dd4bf" opacity=".3"/>
+        </svg>
+      </div>
+      <p class="empty-title">Halo, aku HUM 👋</p>
+      <p class="empty-desc">Humble Utility Machine — rendah hati, siap membantu. Tanyakan apa saja.</p>
+      <div class="suggestions">
+        <button class="sug-btn" onclick="useSuggestion(this)">Jelaskan quantum computing secara sederhana</button>
+        <button class="sug-btn" onclick="useSuggestion(this)">Buatkan kode Python untuk binary search</button>
+        <button class="sug-btn" onclick="useSuggestion(this)">Apa perbedaan React dan Vue?</button>
+        <button class="sug-btn" onclick="useSuggestion(this)">Tuliskan cerita pendek sci-fi 200 kata</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ FOOTER ═══ -->
+  <footer>
+    <div class="input-wrap" id="input-wrap">
+      <textarea id="input" placeholder="Ketik pesan..." rows="1" enterkeyhint="send" autocomplete="off" autocorrect="off"></textarea>
+      <!-- Stop button (hidden by default) -->
+      <button class="stop-btn hidden" id="stop-btn" type="button" title="Stop">
+        <svg viewBox="0 0 20 20" fill="currentColor"><rect x="4" y="4" width="12" height="12" rx="2"/></svg>
+      </button>
+      <!-- Send button -->
+      <button class="send-btn" id="send-btn" type="button" title="Kirim" disabled>
+        <!-- Paper plane icon -->
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M17.5 2.5L9 11M17.5 2.5L12 17l-3-6-6-3 14.5-5.5z"/>
+        </svg>
+      </button>
+    </div>
+    <p class="foot-note">HUM · Powered by <a href="https://freemodel.dev" target="_blank" rel="noreferrer">FreeModel.dev</a></p>
+  </footer>
+</div>
+
+<!-- ═══ SETTINGS MODAL ═══ -->
+<div class="overlay hidden" id="overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">System Prompt</span>
+      <button class="modal-close" id="modal-close" type="button">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="M5 5l10 10M15 5L5 15"/>
+        </svg>
+      </button>
+    </div>
+    <p class="modal-desc">Atur kepribadian, gaya bahasa, dan konteks HUM.</p>
+    <textarea id="system-input" rows="5"></textarea>
+    <div class="modal-actions">
+      <button class="btn-sec" id="modal-cancel" type="button">Batal</button>
+      <button class="btn-pri" id="modal-save" type="button">Simpan</button>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict'
+
+// ─── Supabase Setup ────────────────────────────────────────────
+const SUPABASE_URL = 'https://fudqidnzqtvqkdxuanyo.supabase.co'
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ1ZHFpZG56cXR2cWtkeHVhbnlvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEyMDQ4NDEsImV4cCI6MjA5Njc4MDg0MX0.ULtgB32kT8Nu4SVbcHv4DHdaKCiTTF6AWwFH2esb7Fc'
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+
+let currentUser = null
+let currentSession = null
+
+const $loginScreen = document.getElementById('login-screen')
+const $appRoot     = document.getElementById('app')
+const $googleBtn   = document.getElementById('google-login-btn')
+const $loginLoad   = document.getElementById('login-loading')
+const $userBtn     = document.getElementById('user-btn')
+const $userMenu    = document.getElementById('user-menu')
+const $userAvatar  = document.getElementById('user-avatar')
+const $userEmail   = document.getElementById('user-email')
+const $logoutBtn   = document.getElementById('logout-btn')
+
+$googleBtn.addEventListener('click', async () => {
+  $loginLoad.classList.remove('hidden')
+  await sb.auth.signInWithOAuth({
+    provider: 'google',
+    options: { redirectTo: window.location.origin }
+  })
+})
+
+$userBtn.addEventListener('click', e => {
+  e.stopPropagation()
+  $userMenu.classList.toggle('open')
+})
+document.addEventListener('click', () => $userMenu.classList.remove('open'))
+
+$logoutBtn.addEventListener('click', async () => {
+  await sb.auth.signOut()
+  window.location.reload()
+})
+
+function showApp(user) {
+  currentUser = user
+  $userAvatar.src = user.user_metadata?.avatar_url || ''
+  $userEmail.textContent = user.email || ''
+  $loginScreen.classList.add('hidden')
+  $appRoot.classList.add('visible')
+  initApp()
+}
+
+function showLogin() {
+  $loginScreen.classList.remove('hidden')
+  $appRoot.classList.remove('visible')
+}
+
+// ─── Check session on load ─────────────────────────────────────
+sb.auth.getSession().then(({ data }) => {
+  if (data.session) {
+    currentSession = data.session
+    showApp(data.session.user)
+  } else {
+    showLogin()
+  }
+})
+
+sb.auth.onAuthStateChange((event, session) => {
+  currentSession = session
+  if (session) {
+    if (!currentUser) showApp(session.user)
+  } else {
+    showLogin()
+  }
+})
+
+
+
+// ─── Constants ───────────────────────────────────────────────
+const DEFAULT_SYSTEM = 'Kamu adalah HUM (Humble Utility Machine) — asisten AI yang rendah hati, cerdas, dan selalu berusaha memberikan jawaban yang benar-benar berguna. Kamu tidak pernah sombong, selalu jujur jika tidak tahu, dan senang membantu siapa saja. Jawab dengan jelas, ringkas, dan hangat. Gunakan Bahasa Indonesia kecuali user minta bahasa lain.'
+
+const TYPEWRITER_SPEED = 10 // ms per char (lower = faster)
+const STORAGE_SYS_KEY = 'hum_system_prompt_v1'
+const STORAGE_MODEL_KEY = 'hum_model_v1'
+const STORAGE_CONV_LIST = 'hum_conv_list'
+const STORAGE_CURRENT_CONV = 'hum_current_conv'
+
+const MAX_CONTEXT_MESSAGES = 20 // jumlah pesan terakhir yang dikirim ke API
+
+// ─── State ───────────────────────────────────────────────────
+let messages    = []
+let systemPrompt  = DEFAULT_SYSTEM
+let currentModel  = 'gpt-5.4-mini'
+let isLoading     = false
+let abortCtrl     = null
+let twTimeout     = null
+
+// ─── Multi-thread state ──────────────────────────────────────
+let currentConvId = localStorage.getItem('hum_current_conv') || null
+let conversationsMeta = []   // dari Turso
+let isSidebarOpen = false
+let syncDebounceTimer = null
+let tursoOnline = true
+
+
+// ─── DOM refs ────────────────────────────────────────────────
+const $ = id => document.getElementById(id)
+const $sidebar      = document.getElementById('sidebar')
+const $convList     = document.getElementById('conv-list')
+const $sidebarToggle = document.getElementById('sidebar-toggle')
+const $sidebarOpen  = document.getElementById('sidebar-open')
+const $newChatBtn   = document.getElementById('new-chat-btn')
+const $syncStatus   = document.getElementById('sync-status')
+const $sidebarOverlay = document.getElementById('sidebar-overlay')
+const $sysInput   = document.getElementById('system-input')
+const $modelTrig  = document.getElementById('model-trigger')
+const $modelMenu  = document.getElementById('model-menu')
+const $modelLabel = document.getElementById('model-label')
+const $input      = document.getElementById('input')
+const $sendBtn    = document.getElementById('send-btn')
+const $stopBtn    = document.getElementById('stop-btn')
+const $clearBtn   = document.getElementById('clear-btn')
+const $messages   = document.getElementById('messages')
+const $empty      = document.getElementById('empty')
+const $overlay    = document.getElementById('overlay')
+
+$sysInput.value = systemPrompt
+
+// ─── Custom model dropdown ────────────────────────────────────
+$modelTrig.addEventListener('click', e => {
+  e.stopPropagation()
+  const open = $modelMenu.classList.toggle('open')
+  $modelTrig.classList.toggle('open', open)
+})
+
+document.addEventListener('click', () => {
+  $modelMenu.classList.remove('open')
+  $modelTrig.classList.remove('open')
+})
+
+$modelMenu.addEventListener('click', e => {
+  const opt = e.target.closest('.model-option')
+  if (!opt) return
+  e.stopPropagation()
+
+  currentModel = opt.dataset.value
+  $modelLabel.textContent = currentModel
+
+  $modelMenu.querySelectorAll('.model-option').forEach(o => o.classList.remove('active'))
+  opt.classList.add('active')
+
+  $modelMenu.classList.remove('open')
+  $modelTrig.classList.remove('open')
+  saveState()
+})
+
+// ─── Textarea auto-resize + enable send ──────────────────────
+function updateInput() {
+  $sendBtn.disabled = !$input.value.trim() || isLoading
+  $input.style.height = 'auto'
+  $input.style.height = Math.min($input.scrollHeight, 150) + 'px'
+}
+     // ─── UUID helper ─────────────────────────────────────────────
+function generateId() {
+  return crypto.randomUUID ? crypto.randomUUID()
+    : ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g,c=>(c^crypto.getRandomValues(new Uint8Array(1))[0]&15>>c/4).toString(16))
+}
+
+// ─── Conversation storage helpers ────────────────────────────
+function getConvKey(id) { return 'hum_conv_' + id }
+function getConvMessages(id) {
+  try { return JSON.parse(localStorage.getItem(getConvKey(id)) || '[]') }
+  catch { return [] }
+}
+function setConvMessages(id, msgs) {
+  localStorage.setItem(getConvKey(id), JSON.stringify(msgs))
+}
+
+// ─── Sidebar toggle ──────────────────────────────────────────
+function toggleSidebar() {
+  isSidebarOpen = !isSidebarOpen
+  $sidebar.classList.toggle('open', isSidebarOpen)
+  $sidebarOverlay.classList.toggle('open', isSidebarOpen)
+  document.body.classList.toggle('sidebar-open', isSidebarOpen)
+}
+
+$sidebarToggle?.addEventListener('click', toggleSidebar)
+$sidebarOpen?.addEventListener('click', toggleSidebar)
+$sidebarOverlay?.addEventListener('click', toggleSidebar)
+
+// ─── New chat ────────────────────────────────────────────────
+function startNewChat() {
+  currentConvId = generateId()
+  localStorage.setItem(STORAGE_CURRENT_CONV, currentConvId)
+  messages = []
+  document.querySelectorAll('.msg-row, .error-box').forEach(el => el.remove())
+  $empty.style.display = ''
+  $clearBtn.disabled = true
+  renderSidebar()
+  saveCurrentLocal()
+}
+
+$newChatBtn?.addEventListener('click', startNewChat)
+
+// ─── Save current conversation ─────────────────────────────────
+function saveCurrentLocal() {
+  if (!currentConvId) currentConvId = generateId()
+  const title = messages.length > 0
+    ? (messages[0].content.slice(0, 40) || 'New Chat')
+    : 'New Chat'
+  const meta = {
+    id: currentConvId,
+    title,
+    model: currentModel,
+    system_prompt: systemPrompt,
+    updated_at: Date.now(),
+  }
+  setConvMessages(currentConvId, messages)
+  let list = JSON.parse(localStorage.getItem(STORAGE_CONV_LIST) || '[]')
+  list = list.filter(c => c.id !== currentConvId)
+  list.unshift(meta)
+  localStorage.setItem(STORAGE_CONV_LIST, JSON.stringify(list.slice(0, 100)))
+  renderSidebar()
+  scheduleSync()
+}
+
+// ─── Load conversation ───────────────────────────────────────
+function loadConversation(id) {
+  currentConvId = id
+  localStorage.setItem(STORAGE_CURRENT_CONV, id)
+  messages = getConvMessages(id)
+  renderMessages()
+  $empty.style.display = 'none'
+  $clearBtn.disabled = messages.length === 0
+  renderSidebar()
+  if (window.innerWidth < 768) toggleSidebar()
+}
+
+// ─── Render all messages ─────────────────────────────────────
+function renderMessages() {
+  document.querySelectorAll('.msg-row, .error-box').forEach(el => el.remove())
+  for (const m of messages) {
+    const bubble = addBubble(m.role, m.content)
+    if (m.role === 'assistant') {
+      bubble.innerHTML = renderMarkdown(m.content)
+      highlightCode(bubble)
+    }
+  }
+  scrollBottom()
+}
+
+// ─── Render sidebar list ─────────────────────────────────────
+function renderSidebar() {
+  const localList = JSON.parse(localStorage.getItem(STORAGE_CONV_LIST) || '[]')
+  const map = new Map()
+  for (const c of [...conversationsMeta, ...localList]) {
+    if (!map.has(c.id)) map.set(c.id, c)
+    else if (c.updated_at > map.get(c.id).updated_at) map.set(c.id, c)
+  }
+  const sorted = Array.from(map.values()).sort((a, b) => b.updated_at - a.updated_at)
+
+  $convList.innerHTML = sorted.map(c => `
+    <div class="conv-item ${c.id === currentConvId ? 'active' : ''}" data-id="${escHtml(c.id)}">
+      <div class="conv-title">${escHtml(c.title || 'New Chat')}</div>
+      <div class="conv-meta">${new Date(c.updated_at).toLocaleDateString()}</div>
+      <button class="conv-del" data-id="${escHtml(c.id)}" title="Delete" type="button">×</button>
+    </div>
+  `).join('')
+
+  $convList.querySelectorAll('.conv-item').forEach(el => {
+    el.addEventListener('click', e => {
+      if (e.target.closest('.conv-del')) return
+      loadConversation(el.dataset.id)
+    })
+  })
+  $convList.querySelectorAll('.conv-del').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      e.stopPropagation()
+      const id = btn.dataset.id
+      if (!confirm('Hapus percakapan ini?')) return
+      localStorage.removeItem(getConvKey(id))
+      let list = JSON.parse(localStorage.getItem(STORAGE_CONV_LIST) || '[]')
+      localStorage.setItem(STORAGE_CONV_LIST, JSON.stringify(list.filter(c => c.id !== id)))
+      try {
+        await fetch('/api/sync?conv=' + encodeURIComponent(id), {
+          method: 'DELETE',
+          headers: { 'Authorization': 'Bearer ' + (currentSession?.access_token || '') },
+        })
+      } catch {}
+      if (currentConvId === id) startNewChat()
+      else renderSidebar()
+    })
+  })
+}
+
+// ─── Sync to Turso (debounced) ──────────────────────────────
+function scheduleSync() {
+  clearTimeout(syncDebounceTimer)
+  syncDebounceTimer = setTimeout(syncToTurso, 3000)
+}
+
+async function syncToTurso() {
+  if (!currentSession?.access_token || !currentConvId) return
+  const payload = {
+    conversation: {
+      id: currentConvId,
+      title: messages[0]?.content?.slice(0, 60) || 'New Chat',
+      model: currentModel,
+      system_prompt: systemPrompt,
+      created_at: messages[0]?.created_at || Date.now(),
+    },
+    messages: messages.map(m => ({
+      role: m.role,
+      content: m.content,
+      created_at: m.created_at || Date.now(),
+    })),
+  }
+  try {
+    const res = await fetch('/api/sync', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + currentSession.access_token,
+      },
+      body: JSON.stringify(payload),
+    })
+    if (res.ok) {
+      tursoOnline = true
+      $syncStatus.textContent = '● synced'
+      $syncStatus.className = 'sync-status online'
+      fetchSidebarList()
+    } else {
+      throw new Error('sync failed')
+    }
+  } catch (e) {
+    tursoOnline = false
+    $syncStatus.textContent = '● offline'
+    $syncStatus.className = 'sync-status offline'
+  }
+}
+
+async function fetchSidebarList() {
+  if (!currentSession?.access_token) return
+  try {
+    const res = await fetch('/api/sync?list=1', {
+      headers: { 'Authorization': 'Bearer ' + currentSession.access_token },
+    })
+    if (res.ok) {
+      const data = await res.json()
+      conversationsMeta = data.conversations || []
+      tursoOnline = true
+      $syncStatus.textContent = '● synced'
+      $syncStatus.className = 'sync-status online'
+      renderSidebar()
+    }
+  } catch {
+    tursoOnline = false
+    $syncStatus.textContent = '● offline'
+    $syncStatus.className = 'sync-status offline'
+  }
+}
+
+
+$input.addEventListener('input', updateInput)
+
+// ─── Enter = send, Shift+Enter = newline (multi-line) ──────────
+// Sebelumnya semua "\n" di-strip + auto-send → multi-line nggak
+// mungkin sama sekali (termasuk dari paste). Sekarang pakai
+// beforeinput supaya konsisten di desktop & Android:
+// - Enter polos          → kirim pesan
+// - Shift+Enter          → sisipkan newline (dibiarkan default)
+// - Newline dari paste    → tetap utuh, tidak di-strip
+let shiftHeld = false
+$input.addEventListener('keydown', e => {
+  if (e.key === 'Shift') shiftHeld = true
+})
+$input.addEventListener('keyup', e => {
+  if (e.key === 'Shift') shiftHeld = false
+})
+
+$input.addEventListener('beforeinput', e => {
+  if (e.inputType === 'insertLineBreak') {
+    if (shiftHeld || e.shiftKey) return // biarkan newline disisipkan
+    e.preventDefault()
+    if ($input.value.trim()) sendMessage()
+  }
+})
+
+// ─── Send / Stop buttons ──────────────────────────────────────
+$sendBtn.addEventListener('click', sendMessage)
+$stopBtn.addEventListener('click', () => {
+  abortCtrl?.abort()
+  if (twTimeout) { clearTimeout(twTimeout); twTimeout = null }
+})
+
+// ─── Clear ────────────────────────────────────────────────────
+$clearBtn.addEventListener('click', () => {
+  messages = []
+  document.querySelectorAll('.msg-row, .error-box').forEach(el => el.remove())
+  $empty.style.display = ''
+  $clearBtn.disabled = true
+  if (currentConvId) {
+    localStorage.removeItem(getConvKey(currentConvId))
+    let list = JSON.parse(localStorage.getItem(STORAGE_CONV_LIST) || '[]')
+    localStorage.setItem(STORAGE_CONV_LIST, JSON.stringify(list.filter(c => c.id !== currentConvId)))
+  }
+  startNewChat()
+})
+
+
+// ─── Settings modal ───────────────────────────────────────────
+$('settings-btn').addEventListener('click', () => {
+  $sysInput.value = systemPrompt
+  $overlay.classList.remove('hidden')
+})
+$('modal-cancel').addEventListener('click', () => $overlay.classList.add('hidden'))
+$('modal-close').addEventListener('click',  () => $overlay.classList.add('hidden'))
+$overlay.addEventListener('click', e => { if (e.target === $overlay) $overlay.classList.add('hidden') })
+$('modal-save').addEventListener('click', () => {
+  systemPrompt = $sysInput.value.trim() || DEFAULT_SYSTEM
+  $overlay.classList.add('hidden')
+  saveState()
+})
+
+// ─── Suggestions ─────────────────────────────────────────────
+function useSuggestion(btn) {
+  $input.value = btn.textContent.trim()
+  updateInput()
+  $input.focus()
+}
+window.useSuggestion = useSuggestion
+
+// ─── Helpers ─────────────────────────────────────────────────
+function scrollBottom() {
+  $messages.scrollTop = $messages.scrollHeight
+}
+
+function escHtml(t) {
+  return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+}
+
+// ─── Token helper: hindari refresh-token race antar tab ────────
+// Refresh token Supabase bersifat single-use & rotating. Kalau 2 tab
+// sama-sama refresh hampir bersamaan, salah satu bisa kena logout
+// karena refresh token-nya sudah dipakai tab lain.
+// Solusi: kalau access token MASIH valid > 2 menit, pakai langsung
+// (tanpa panggil getSession() yang bisa memicu refresh). Cuma minta
+// session baru kalau memang hampir/sudah expired.
+function decodeJwtExp(token) {
+  try {
+    const payload = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')
+    return JSON.parse(atob(payload)).exp || 0 // detik sejak epoch
+  } catch {
+    return 0
+  }
+}
+
+async function getValidAccessToken() {
+  const token = currentSession?.access_token
+  const exp = token ? decodeJwtExp(token) : 0
+  const now = Math.floor(Date.now() / 1000)
+
+  if (token && exp - now > 120) {
+    return token // masih valid > 2 menit, langsung pakai
+  }
+
+  // Hampir/sudah expired → minta session terbaru (Supabase auto-refresh di sini)
+  const { data } = await sb.auth.getSession()
+  currentSession = data?.session || null
+  return currentSession?.access_token || null
+}
+
+// ─── Persistence (localStorage) ───────────────────────────────
+function saveState() {
+  saveCurrentLocal()
+}
+
+
+function loadState() {
+  try {
+    const savedSys   = localStorage.getItem(STORAGE_SYS_KEY)
+    const savedModel = localStorage.getItem(STORAGE_MODEL_KEY)
+
+    if (savedSys) {
+      systemPrompt = savedSys
+      $sysInput.value = systemPrompt
+    }
+
+    if (savedModel) {
+      const opt = $modelMenu.querySelector(`.model-option[data-value="${savedModel}"]`)
+      if (opt) {
+        currentModel = savedModel
+        $modelLabel.textContent = currentModel
+        $modelMenu.querySelectorAll('.model-option').forEach(o => o.classList.remove('active'))
+        opt.classList.add('active')
+      }
+    }
+
+    if (currentConvId) {
+      messages = getConvMessages(currentConvId)
+      if (messages.length) {
+        $empty.style.display = 'none'
+        for (const m of messages) {
+          const bubble = addBubble(m.role, m.content)
+          if (m.role === 'assistant') {
+            bubble.innerHTML = renderMarkdown(m.content)
+            highlightCode(bubble)
+          }
+        }
+        $clearBtn.disabled = false
+        scrollBottom()
+      }
+    }
+    renderSidebar()
+    fetchSidebarList()
+  } catch (e) { /* data korup, abaikan */ }
+}
+
+
+// ─── Markdown render: marked (parser) + DOMPurify (sanitizer) ──
+// Mengganti regex-based renderer lama (ReDoS-prone & salah wrap paragraf).
+marked.setOptions({ gfm: true, breaks: true })
+
+const SANITIZE_CONFIG = {
+  ALLOWED_TAGS: ['p','br','strong','em','del','code','pre','blockquote','hr',
+    'ul','ol','li','h1','h2','h3','h4','a','table','thead','tbody','tr','th','td','img','span'],
+  ALLOWED_ATTR: ['href','class','target','rel','src','alt'],
+}
+
+function renderMarkdown(text) {
+  const rawHtml = marked.parse(text || '')
+  const clean = DOMPurify.sanitize(rawHtml, SANITIZE_CONFIG)
+
+  // Bungkus tiap <pre><code> dengan wrapper + tombol Copy (mempertahankan UI lama)
+  const tmp = document.createElement('div')
+  tmp.innerHTML = clean
+  tmp.querySelectorAll('pre').forEach(pre => {
+    const code = pre.querySelector('code')
+    const langMatch = code?.className.match(/language-(\w+)/)
+    const lang = langMatch ? langMatch[1] : ''
+    const label = lang ? `<span class="code-lang-label">${lang}</span>` : ''
+    const wrap = document.createElement('div')
+    wrap.className = 'code-wrap'
+    wrap.innerHTML = `${label}<button class="code-copy-btn" type="button"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="9" height="9" rx="1.5"/><path d="M3 10.5V3a1 1 0 011-1h7.5"/></svg><span>Copy</span></button>`
+    pre.replaceWith(wrap)
+    wrap.appendChild(pre)
+  })
+
+  return tmp.innerHTML
+}
+
+
+
+// ─── Add message bubble ───────────────────────────────────────
+function addBubble(role, content) {
+  $empty.style.display = 'none'
+
+  const row = document.createElement('div')
+  row.className = 'msg-row' + (role === 'user' ? ' user' : '')
+
+  const av = document.createElement('div')
+  av.className = 'avatar ' + (role === 'user' ? 'user-av' : 'ai')
+  av.textContent = role === 'user' ? 'U' : 'AI'
+
+  const bubble = document.createElement('div')
+  bubble.className = 'bubble ' + role
+
+  if (role === 'user') {
+    bubble.textContent = content
+    row.appendChild(bubble)
+    row.appendChild(av)
+  } else {
+    bubble.innerHTML = '<span class="tw-cursor"></span>'
+
+    const wrap = document.createElement('div')
+    wrap.className = 'bubble-wrap ai-wrap'
+    wrap.appendChild(bubble)
+
+    const actions = document.createElement('div')
+    actions.className = 'bubble-actions'
+    actions.innerHTML =
+      '<button class="bubble-action-btn copy-msg-btn" type="button">' +
+        '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="9" height="9" rx="1.5"/><path d="M3 10.5V3a1 1 0 011-1h7.5"/></svg>' +
+        '<span>Copy</span>' +
+      '</button>'
+    wrap.appendChild(actions)
+
+    row.appendChild(av)
+    row.appendChild(wrap)
+  }
+
+  $messages.appendChild(row)
+  scrollBottom()
+  return bubble
+}
+
+// ─── Syntax highlighting ───────────────────────────────────────
+function highlightCode(bubble) {
+  if (typeof hljs === 'undefined') return
+  bubble.querySelectorAll('pre code').forEach(block => {
+    try { hljs.highlightElement(block) } catch {}
+  })
+}
+
+// ─── Copy to clipboard helper ──────────────────────────────────
+function copyText(text, btn) {
+  const span = btn.querySelector('span')
+  const original = span ? span.textContent : ''
+
+  const done = () => {
+    btn.classList.add('copied')
+    if (span) span.textContent = 'Disalin!'
+    setTimeout(() => {
+      btn.classList.remove('copied')
+      if (span) span.textContent = original
+    }, 1500)
+  }
+
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done))
+  } else {
+    fallbackCopy(text, done)
+  }
+}
+
+function fallbackCopy(text, done) {
+  const ta = document.createElement('textarea')
+  ta.value = text
+  ta.style.position = 'fixed'
+  ta.style.opacity = '0'
+  document.body.appendChild(ta)
+  ta.select()
+  try { document.execCommand('copy') } catch {}
+  document.body.removeChild(ta)
+  done()
+}
+
+// ─── Event delegation: copy buttons (per code block & per message) ─
+$messages.addEventListener('click', e => {
+  const codeBtn = e.target.closest('.code-copy-btn')
+  if (codeBtn) {
+    const codeEl = codeBtn.parentElement.querySelector('pre code')
+    if (codeEl) copyText(codeEl.textContent, codeBtn)
+    return
+  }
+
+  const msgBtn = e.target.closest('.copy-msg-btn')
+  if (msgBtn) {
+    const bubble = msgBtn.closest('.bubble-wrap')?.querySelector('.bubble')
+    if (bubble) copyText(bubble.innerText, msgBtn)
+    return
+  }
+})
+
+// ─── Loading state ────────────────────────────────────────────
+function setLoading(val) {
+  isLoading = val
+  $sendBtn.classList.toggle('hidden', val)
+  $stopBtn.classList.toggle('hidden', !val)
+  $input.disabled = val
+  if (!val) updateInput()
+  $clearBtn.disabled = val || messages.length === 0
+  $modelTrig.disabled = val
+}
+
+// ─── bfcache fix ────────────────────────────────────────────────
+// Kalau user navigate away lalu balik (tombol back), browser bisa
+// restore halaman dari bfcache dengan state JS "beku" (isLoading
+// masih true, abortCtrl basi, dll) padahal UI keliatan normal.
+// Reset semua state terkait loading saat halaman direstore.
+window.addEventListener('pageshow', e => {
+  if (e.persisted) {
+    if (twTimeout) { clearTimeout(twTimeout); twTimeout = null }
+    abortCtrl?.abort()
+    abortCtrl = null
+    setLoading(false)
+  }
+})
+
+// ─── Fetch dengan retry (exponential backoff 3x: 1s, 2s, 4s) ──
+// Retry hanya untuk server error (5xx) atau network error,
+// tidak untuk 4xx (401/429) dan tidak kalau user pencet Stop.
+async function fetchWithRetry(url, options, onRetry) {
+  const delays = [1000, 2000, 4000]
+  for (let attempt = 0; attempt <= delays.length; attempt++) {
+    try {
+      const res = await fetch(url, options)
+      if (res.status >= 500 && attempt < delays.length) {
+        onRetry?.(attempt + 1, delays.length)
+        await new Promise(r => setTimeout(r, delays[attempt]))
+        continue
+      }
+      return res
+    } catch (e) {
+      if (options.signal?.aborted) throw e
+      if (attempt < delays.length) {
+        onRetry?.(attempt + 1, delays.length)
+        await new Promise(r => setTimeout(r, delays[attempt]))
+        continue
+      }
+      throw e
+    }
+  }
+}
+
+// ─── Send message (real streaming) ───────────────────────────
+async function sendMessage() {
+  const text = $input.value.trim()
+  if (!text || isLoading) return
+
+  $input.value = ''
+  $input.style.height = 'auto'
+
+  messages.push({ role: 'user', content: text, created_at: Date.now() })
+
+  addBubble('user', text)
+  setLoading(true)
+  saveState()
+
+  const aiBubble = addBubble('assistant', '')
+  abortCtrl = new AbortController()
+  let fullText = ''
+
+  try {
+    const contextMessages = messages.slice(-MAX_CONTEXT_MESSAGES)
+
+    // Ambil token (pakai cache kalau masih valid > 2 menit, hindari refresh race)
+    const accessToken = await getValidAccessToken()
+
+    if (!accessToken) {
+      showLogin()
+      throw new Error('Sesi login habis. Silakan login ulang.')
+    }
+
+    const res = await fetchWithRetry('/api/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+      },
+      signal: abortCtrl.signal,
+      body: JSON.stringify({ messages: contextMessages, model: currentModel, systemPrompt }),
+    }, (attempt, max) => {
+      aiBubble.innerHTML = `<span style="color:var(--muted);font-size:12.5px">Koneksi gagal, mencoba lagi... (${attempt}/${max})</span><span class="tw-cursor"></span>`
+      scrollBottom()
+    })
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.error || `HTTP ${res.status}`)
+    }
+
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let streamDone = false
+
+    function processLine(line) {
+      if (!line || line.startsWith(':')) return // SSE comment / keep-alive ping, abaikan
+      if (!line.startsWith('data: ')) return
+      const raw = line.slice(6).trim()
+      if (!raw) return // empty `data:` line, abaikan
+      if (raw === '[DONE]') { streamDone = true; return }
+
+      try {
+        const parsed = JSON.parse(raw)
+        const delta = parsed.choices?.[0]?.delta?.content || ''
+        if (delta) {
+          fullText += delta
+          // Tampil teks mentah + cursor saat streaming berlangsung
+          aiBubble.innerHTML = escHtml(fullText) + '<span class="tw-cursor"></span>'
+          scrollBottom()
+        }
+      } catch (e) {
+        console.warn('SSE parse error:', e, raw)
+      }
+    }
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) {
+        // Proses sisa buffer (chunk terakhir bisa datang tanpa trailing \n)
+        if (buffer) processLine(buffer)
+        break
+      }
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() // baris yang belum lengkap, simpan dulu
+
+      for (const line of lines) {
+        processLine(line)
+        if (streamDone) break
+      }
+      if (streamDone) break
+    }
+
+    // Setelah stream selesai, render markdown
+    aiBubble.innerHTML = renderMarkdown(fullText)
+    highlightCode(aiBubble)
+    scrollBottom()
+    messages.push({ role: 'assistant', content: fullText })
+    saveState()
+
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      if (fullText) {
+        aiBubble.innerHTML = renderMarkdown(fullText)
+        highlightCode(aiBubble)
+        messages.push({ role: 'assistant', content: fullText, created_at: Date.now() })
+
+      } else {
+        aiBubble.closest('.msg-row')?.remove()
+        messages.pop()
+      }
+      saveState()
+    } else {
+      const errBox = document.createElement('div')
+      errBox.className = 'error-box'
+      errBox.innerHTML = `<svg width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="flex-shrink:0"><circle cx="10" cy="10" r="8"/><path d="M10 6v4M10 14h.01"/></svg><span>${escHtml(err.message)}</span>`
+      aiBubble.closest('.msg-row')?.replaceWith(errBox)
+      messages.pop()
+      saveState()
+    }
+  } finally {
+    setLoading(false)
+    $clearBtn.disabled = messages.length === 0
+    $input.focus()
+  }
+}
+
+// ─── App initialization (called after login) ──────────────────
+let appInitialized = false
+function initApp() {
+  if (appInitialized) return
+  appInitialized = true
+  loadState()
+  setInterval(() => {
+    if (messages.length && currentConvId) syncToTurso()
+  }, 30000)
+}
+
+
+</script>
+</body>
+              </html>
  
